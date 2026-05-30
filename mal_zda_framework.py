@@ -182,6 +182,8 @@ def load_and_preprocess_real_data(
                 df.shape[1]-1)] + ['target']
 
         feature_names = df.columns[:-1].tolist()
+        # features =df.columns[:-1].tolist()
+        
         feature_cols = df.columns[:-1]
         target_col = str(df.columns[-1])
 
