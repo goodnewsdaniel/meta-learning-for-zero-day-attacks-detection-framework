@@ -210,7 +210,7 @@ def load_and_preprocess_real_data(
             # Convert to float
             df[col] = df[col].astype(np.float64)
 
-        # Handle categorical features
+        # Handle categorical features (excluding target)
         categorical_features = df[feature_cols].select_dtypes(
             include=['object', 'category']).columns
 
@@ -220,11 +220,22 @@ def load_and_preprocess_real_data(
             df[col] = df[col].fillna('unknown')
             df[col] = label_encoders[col].fit_transform(df[col].astype(str))
 
-        # Handle target column - ensure it's numeric
-        if df[target_col].dtype == 'object':
+        # Handle target column - ensure it's numeric FIRST, before any filtering
+        # Check if target column contains string/categorical values
+        target_dtype_str = str(df[target_col].dtype).lower()
+        is_numeric = 'int' in target_dtype_str or 'float' in target_dtype_str
+        
+        if not is_numeric:
+            # Column is non-numeric (object or string), encode it
+            # First, fill any NaN values
+            df[target_col] = df[target_col].fillna('unknown')
             le_target = LabelEncoder()
-            encoded_vals = le_target.fit_transform(df[target_col].astype(str))
-            df[target_col] = np.array(encoded_vals, dtype=np.int64)
+            # Convert to numpy array first to ensure proper handling
+            encoded_vals = le_target.fit_transform(df[target_col])
+            df[target_col] = pd.Series(encoded_vals, dtype=np.int64, index=df.index)
+        
+        # Ensure it's int64 and reset index to avoid issues with boolean indexing
+        df[target_col] = df[target_col].astype(np.int64)
 
         # Handle class imbalance
         class_counts = df[target_col].value_counts()
@@ -233,13 +244,17 @@ def load_and_preprocess_real_data(
         if min_class_count < 2:
             print("\nWarning: Severe class imbalance detected!")
             valid_classes = list(class_counts[class_counts >= 2].index)
-            df = df[df[target_col].isin(valid_classes)]
+            # Filter using copy to avoid chained assignment issues
+            df = df[df[target_col].isin(valid_classes)].copy()
+            # Force target column back to int64 after filtering
+            df[target_col] = df[target_col].astype(np.int64)
+            df = df.reset_index(drop=True)
             print(
                 f"Keeping only classes with ≥2 samples: {list(valid_classes)}")
 
         # Extract features and labels
         X = df[feature_cols].values.astype(np.float64)
-        y = df[target_col].values.astype(np.int64)
+        y = df[target_col].astype(np.int64).values
 
         # Store unscaled data
         X_unscaled = X.copy()
@@ -1890,8 +1905,8 @@ def create_comparison_visualization(results_comp: Dict, results_std: Dict, save_
         for bar in bars:
             height = bar.get_height()
             axes[1, 1].text(bar.get_x() + bar.get_width()/2., height,
-                            f'{height:.3f}',
-                            ha='center', va='bottom', fontsize=10)
+                    f'{height:.3f}',
+                    ha='center', va='bottom', fontsize=10)
 
     axes[1, 1].set_ylabel('Score')
     axes[1, 1].set_title('All Metrics Comparison')
@@ -2152,7 +2167,8 @@ def _save_individual_ablation_f1(ablation_results: Dict, save_name: str) -> None
     ax.set_ylim(ylim_val[0], ylim_val[1])
 
     plt.tight_layout()
-    plt.savefig(RESULTS_DIR / f'{save_name}_f1.png',
+    plt.savefig(
+        RESULTS_DIR / f'{save_name}_f1.png',
                 dpi=300, bbox_inches='tight')
     plt.close()
 
@@ -2876,7 +2892,7 @@ def main():
     print("="*80)
 
     # Check if real data exists, otherwise use synthetic
-    real_data_path = DATA_DIR / "cybersecurity_data.csv"
+    real_data_path = DATA_DIR / "CICIDS2017_Cleaned_Dataset.csv"
 
     if real_data_path.exists():
         print(f"\nLoading real data from {real_data_path}")
